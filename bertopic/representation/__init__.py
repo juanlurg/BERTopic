@@ -37,8 +37,8 @@ except ModuleNotFoundError:
 try:
     from bertopic.representation._gemini import Gemini
 except ModuleNotFoundError:
-    msg = "`pip install google-generativeai` \n\n"
-    Gemini = NotInstalled("Gemini", "google-generativeai", custom_msg=msg)
+    msg = "`pip install google-genai` \n\n"
+    Gemini = NotInstalled("Gemini", "google-genai", custom_msg=msg)
 
 # LiteLLM Generator
 try:

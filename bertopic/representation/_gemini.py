@@ -48,18 +48,22 @@ DEFAULT_SYSTEM_PROMPT = "You are an assistant that extracts high-level topics fr
 
 class Gemini(BaseRepresentation):
     r"""Using Google's Gemini API to generate topic labels based
-    on their generative models.
+    on their generative models via the google-genai SDK.
 
     For an overview see:
     https://ai.google.dev/gemini-api/docs/models/gemini
 
     Arguments:
-        client: A `google.generativeai.GenerativeModel` instance or model name string.
-                If a string is provided, a GenerativeModel will be created with that name.
-        model: Model to use within Gemini, defaults to `"gemini-1.5-flash"`.
-               This parameter is ignored if `client` is already a GenerativeModel instance.
-        generator_kwargs: Kwargs passed to `model.generate_content()`
-                          for fine-tuning the output.
+        client: A `google.genai.Client` instance. If None, a new client will be created
+                using the provided api_key or environment variables.
+        api_key: API key for Gemini Developer API. If not provided, will look for
+                 GEMINI_API_KEY or GOOGLE_API_KEY environment variable.
+        model: Model to use within Gemini, defaults to `"gemini-2.0-flash-exp"`.
+        vertexai: If True, use Vertex AI instead of Gemini Developer API.
+        project: Google Cloud project ID (required if vertexai=True).
+        location: Google Cloud location (required if vertexai=True), e.g., 'us-central1'.
+        generator_kwargs: Kwargs passed to GenerateContentConfig for fine-tuning the output.
+                          Can include: temperature, top_p, top_k, max_output_tokens, etc.
         prompt: The prompt to be used in the model. If no prompt is given,
                 `self.default_prompt_` is used instead.
                 NOTE: Use `"[KEYWORDS]"` and `"[DOCUMENTS]"` in the prompt
@@ -98,44 +102,52 @@ class Gemini(BaseRepresentation):
 
     Usage:
 
-    To use this, you will need to install the google-generativeai package first:
+    To use this, you will need to install the google-genai package first:
 
-    `pip install google-generativeai`
+    `pip install google-genai`
 
     Then, get yourself an API key and use Gemini's API as follows:
 
     ```python
-    import google.generativeai as genai
+    from google import genai
     from bertopic.representation import Gemini
     from bertopic import BERTopic
 
-    # Configure the API key
-    genai.configure(api_key=MY_API_KEY)
+    # Option 1: Pass API key directly
+    client = genai.Client(api_key='YOUR_API_KEY')
+    representation_model = Gemini(client=client, delay_in_seconds=1)
 
-    # Create your representation model
-    representation_model = Gemini(model="gemini-1.5-flash", delay_in_seconds=1)
+    # Option 2: Use environment variable (GEMINI_API_KEY or GOOGLE_API_KEY)
+    representation_model = Gemini(model="gemini-2.0-flash-exp", delay_in_seconds=1)
 
     # Use the representation model in BERTopic on top of the default pipeline
     topic_model = BERTopic(representation_model=representation_model)
     ```
 
-    You can also pass a pre-configured GenerativeModel instance:
+    For Vertex AI:
 
     ```python
-    import google.generativeai as genai
     from bertopic.representation import Gemini
 
-    # Configure and create model
-    genai.configure(api_key=MY_API_KEY)
-    model = genai.GenerativeModel("gemini-1.5-flash")
-    representation_model = Gemini(client=model, delay_in_seconds=1)
+    # Option 1: Pass parameters directly
+    representation_model = Gemini(
+        vertexai=True,
+        project='your-project-id',
+        location='us-central1',
+        model='gemini-2.0-flash-exp',
+        delay_in_seconds=1
+    )
+
+    # Option 2: Use environment variables
+    # Set GOOGLE_GENAI_USE_VERTEXAI=true, GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION
+    representation_model = Gemini(model="gemini-2.0-flash-exp", delay_in_seconds=1)
     ```
 
     You can also use a custom prompt:
 
     ```python
     prompt = "I have the following documents: [DOCUMENTS] \nThese documents are about the following topic: '"
-    representation_model = Gemini(model="gemini-1.5-flash", prompt=prompt, delay_in_seconds=1)
+    representation_model = Gemini(model="gemini-2.0-flash-exp", prompt=prompt, delay_in_seconds=1)
     ```
 
     You can use generator_kwargs to pass additional parameters:
@@ -148,7 +160,7 @@ class Gemini(BaseRepresentation):
         "max_output_tokens": 100,
     }
     representation_model = Gemini(
-        model="gemini-1.5-flash",
+        model="gemini-2.0-flash-exp",
         generator_kwargs=generator_kwargs,
         delay_in_seconds=1
     )
@@ -158,7 +170,11 @@ class Gemini(BaseRepresentation):
     def __init__(
         self,
         client=None,
-        model: str = "gemini-1.5-flash",
+        api_key: str = None,
+        model: str = "gemini-2.0-flash-exp",
+        vertexai: bool = False,
+        project: str = None,
+        location: str = None,
         prompt: str = None,
         system_prompt: str = None,
         generator_kwargs: Mapping[str, Any] = {},
@@ -172,26 +188,37 @@ class Gemini(BaseRepresentation):
     ):
         # Import here to handle optional dependency
         try:
-            import google.generativeai as genai
+            from google import genai
+            from google.genai import types
         except ModuleNotFoundError:
             raise ModuleNotFoundError(
-                "google.generativeai is not installed. "
-                "Please install it with: pip install google-generativeai"
+                "google-genai is not installed. "
+                "Please install it with: pip install google-genai"
             )
 
-        # Handle client parameter - can be a model instance or None
+        # Handle client parameter
         if client is None:
-            # Create a new GenerativeModel with the specified model name
-            self.model = genai.GenerativeModel(model)
-            self.model_name = model
-        elif isinstance(client, str):
-            # If client is a string, treat it as model name
-            self.model = genai.GenerativeModel(client)
-            self.model_name = client
+            # Create a new client
+            if vertexai:
+                # Vertex AI client
+                client_kwargs = {"vertexai": True}
+                if project:
+                    client_kwargs["project"] = project
+                if location:
+                    client_kwargs["location"] = location
+                self.client = genai.Client(**client_kwargs)
+            else:
+                # Gemini Developer API client
+                client_kwargs = {}
+                if api_key:
+                    client_kwargs["api_key"] = api_key
+                self.client = genai.Client(**client_kwargs)
         else:
-            # Assume client is already a GenerativeModel instance
-            self.model = client
-            self.model_name = model
+            # Use provided client
+            self.client = client
+
+        self.model = model
+        self.types = types
 
         if prompt is None:
             self.prompt = DEFAULT_CHAT_PROMPT
@@ -251,13 +278,26 @@ class Gemini(BaseRepresentation):
             if self.delay_in_seconds:
                 time.sleep(self.delay_in_seconds)
 
-            # Combine system prompt with user prompt for Gemini
-            full_prompt = f"{self.system_prompt}\n\n{prompt}"
+            # Build config with system instruction and other parameters
+            config_kwargs = {
+                "system_instruction": self.system_prompt,
+                **self.generator_kwargs
+            }
+            config = self.types.GenerateContentConfig(**config_kwargs)
 
             if self.exponential_backoff:
-                response = generate_content_with_backoff(self.model, full_prompt, **self.generator_kwargs)
+                response = generate_content_with_backoff(
+                    self.client,
+                    model=self.model,
+                    contents=prompt,
+                    config=config
+                )
             else:
-                response = self.model.generate_content(full_prompt, **self.generator_kwargs)
+                response = self.client.models.generate_content(
+                    model=self.model,
+                    contents=prompt,
+                    config=config
+                )
 
             # Extract the generated text
             # Handle cases where content might be blocked or empty
@@ -302,16 +342,24 @@ class Gemini(BaseRepresentation):
         return prompt
 
 
-def generate_content_with_backoff(model, prompt, **kwargs):
+def generate_content_with_backoff(client, model, contents, config):
     """Generate content with exponential backoff for rate limit errors."""
     try:
         from google.api_core import exceptions as google_exceptions
-        errors = (google_exceptions.ResourceExhausted,)
+        errors = (google_exceptions.ResourceExhausted, google_exceptions.TooManyRequests)
     except ImportError:
         # Fallback if google-api-core is not available
+        # Try to catch generic rate limit errors
         errors = (Exception,)
 
+    def _generate():
+        return client.models.generate_content(
+            model=model,
+            contents=contents,
+            config=config
+        )
+
     return retry_with_exponential_backoff(
-        model.generate_content,
+        _generate,
         errors=errors,
-    )(prompt, **kwargs)
+    )()
