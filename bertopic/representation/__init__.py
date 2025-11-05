@@ -33,6 +33,13 @@ except ModuleNotFoundError:
     msg = "`pip install openai` \n\n"
     OpenAI = NotInstalled("OpenAI", "openai", custom_msg=msg)
 
+# Gemini Generator
+try:
+    from bertopic.representation._gemini import Gemini
+except ModuleNotFoundError:
+    msg = "`pip install google-generativeai` \n\n"
+    Gemini = NotInstalled("Gemini", "google-generativeai", custom_msg=msg)
+
 # LiteLLM Generator
 try:
     from bertopic.representation._litellm import LiteLLM
@@ -69,6 +76,7 @@ __all__ = [
     "MaximalMarginalRelevance",
     "Cohere",
     "OpenAI",
+    "Gemini",
     "LangChain",
     "LiteLLM",
     "LlamaCPP",
